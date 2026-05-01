@@ -5,54 +5,112 @@ import Product from '@/models/Product';
 
 const apiKey = process.env.GEMINI_API_KEY || "";
 
+// 🌐 Language mapping
+const languageMap: Record<string, string> = {
+    en: "English",
+    hi: "Hindi",
+    bn: "Bengali",
+    ur: "Urdu"
+};
+
 export async function POST(req: Request) {
     try {
-        const { message, language, pdfDataArray } = await req.json();
-        
+        const { message, language = "en", pdfDataArray } = await req.json();
+
+        const selectedLanguage = languageMap[language] || "English";
+
         await connectToDatabase();
         const products = await Product.find({}).lean();
-        const productListString = products.map(p => `${p.name} (${p.weight}) - ₹${p.price}`).join(', ');
 
-        // If no API key is provided, use a smart mock fallback so the chatbot remains functional
+        const productListString = products.length
+            ? products.map(p => `${p.name} (${p.weight}) - ₹${p.price}`).join(', ')
+            : "Vermi compost, NPK, Neem Cake, and more";
+
+        // 🔁 OFFLINE FALLBACK (SMART + MULTILINGUAL)
         if (!apiKey) {
             const lowerMsg = message.toLowerCase();
-            let mockReply = "";
+            let reply = "";
 
-            if (lowerMsg.includes("selling") || lowerMsg.includes("product") || lowerMsg.includes("crop") || lowerMsg.includes("buy")) {
-                mockReply = `As Krishi Sathi, I can help you with that! We are currently selling: ${productListString || "Vermi compost, NPK, Neem Cake, and more"}. You can find these in our Shop section.`;
+            const responses: any = {
+                greeting: {
+                    en: "Hello! I am Krishi Sathi (offline mode). Ask me about farming, soil, or products.",
+                    hi: "नमस्ते! मैं कृषि साथी हूँ (ऑफलाइन मोड)। आप खेती, मिट्टी या उत्पादों के बारे में पूछ सकते हैं।",
+                    bn: "নমস্কার! আমি কৃষি সাথী (অফলাইন মোড)। আপনি চাষ, মাটি বা পণ্যের বিষয়ে জিজ্ঞাসা করতে পারেন।",
+                    ur: "السلام علیکم! میں کرشی ساتھی ہوں (آف لائن موڈ)۔ آپ زراعت یا مصنوعات کے بارے میں پوچھ سکتے ہیں۔"
+                },
+                npk: {
+                    en: "NPK = Nitrogen, Phosphorus, Potassium. Essential nutrients for crops.",
+                    hi: "NPK = नाइट्रोजन, फॉस्फोरस, पोटैशियम। ये फसलों के लिए जरूरी पोषक तत्व हैं।",
+                    bn: "NPK = নাইট্রোজেন, ফসফরাস, পটাশিয়াম। এগুলো ফসলের জন্য জরুরি পুষ্টি উপাদান।",
+                    ur: "NPK = نائٹروجن، فاسفورس، پوٹاشیم۔ یہ فصلوں کے لیے ضروری غذائی اجزاء ہیں۔"
+                },
+                soil: {
+                    en: "Maintain soil like a moist sponge. Avoid overwatering.",
+                    hi: "मिट्टी को नम रखें, लेकिन ज्यादा पानी न दें।",
+                    bn: "মাটি আর্দ্র রাখুন, কিন্তু অতিরিক্ত জল দেবেন না।",
+                    ur: "مٹی کو نم رکھیں لیکن زیادہ پانی نہ دیں۔"
+                },
+                products: {
+                    en: `We sell: ${productListString}`,
+                    hi: `हम ये बेचते हैं: ${productListString}`,
+                    bn: `আমরা বিক্রি করি: ${productListString}`,
+                    ur: `ہم فروخت کرتے ہیں: ${productListString}`
+                }
+            };
+
+            if (lowerMsg.includes("hi") || lowerMsg.includes("hello") || lowerMsg.includes("namaskar")) {
+                reply = responses.greeting[language];
             } else if (lowerMsg.includes("npk")) {
-                mockReply = "NPK stands for Nitrogen, Phosphorus, and Potassium. These are the three main nutrients your crops need. Nitrogen promotes leaf growth, Phosphorus is good for roots and flowers, and Potassium helps with overall health and disease resistance.";
+                reply = responses.npk[language];
             } else if (lowerMsg.includes("soil") || lowerMsg.includes("moisture")) {
-                mockReply = "Soil moisture is critical. Ideally, you want your soil to feel like a wrung-out sponge—damp but not dripping. Our SoilGuard sensors can help you monitor this perfectly in real-time!";
-            } else if (lowerMsg.includes("hello") || lowerMsg.includes("hi") || lowerMsg.includes("namaskar") || lowerMsg.includes("nomoskar")) {
-                mockReply = "Hello! I am Krishi Sathi. I am currently running in offline-demo mode. Feel free to ask me something about our products, NPK, or soil moisture!";
+                reply = responses.soil[language];
+            } else if (lowerMsg.includes("product") || lowerMsg.includes("buy") || lowerMsg.includes("sell")) {
+                reply = responses.products[language];
             } else {
-                mockReply = `That is an excellent question about "${message}". As Krishi Sathi, I suggest monitoring your soil sensors regularly. (Note: Please provide a GEMINI_API_KEY in your .env.local file to unlock my full AI capabilities!)`;
+                reply = {
+                    en: `I understand your query: "${message}". Please connect API for advanced AI response.`,
+                    hi: `मैं आपके प्रश्न को समझता हूँ: "${message}"। कृपया AI सक्षम करने के लिए API जोड़ें।`,
+                    bn: `আমি আপনার প্রশ্ন বুঝেছি: "${message}"। সম্পূর্ণ AI ব্যবহারের জন্য API যোগ করুন।`,
+                    ur: `میں آپ کے سوال کو سمجھتا ہوں: "${message}"۔ مکمل AI کے لیے API شامل کریں۔`
+                }[language];
             }
 
-            return NextResponse.json({ reply: mockReply });
+            return NextResponse.json({ reply });
         }
 
-        // If API key is present, use Google Generative AI
+        // 🤖 GEMINI AI MODE
         const genAI = new GoogleGenerativeAI(apiKey);
         const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-        
-        const systemPrompt = `You are Krishi Sathi, an expert agricultural AI assistant for SoilGuard. 
-THOROUGHNESS IS CRITICAL: If the user provides a list of questions, a questionnaire, or multiple inquiries, you MUST answer EACH and EVERY one of them in detail. Do not skip any part of the user's message.
-Respond in a helpful, professional, and encouraging tone.
-The user is communicating in language or context: ${language || "English"}. Please reply in the appropriate language format.
 
-PRODUCT KNOWLEDGE:
-We are an agricultural store. Here are the products we are currently selling:
+        // 🧠 STRONG SYSTEM PROMPT (Responsible + Multilingual)
+        const systemPrompt = `
+You are "Krishi Sathi", a responsible and expert agricultural AI assistant.
+
+RULES:
+- Always respond in ${selectedLanguage}
+- Be clear, practical, and farmer-friendly
+- If multiple questions are asked, answer ALL
+- Avoid harmful, unsafe, or misleading advice
+- If unsure, say "I am not certain" instead of guessing
+
+PRODUCT LIST:
 ${productListString}
-If the user asks what we sell, what crops are available, or what they can buy, refer to this list.
 
-User Message: ${message}`;
+GUIDELINES:
+- Give actionable farming advice
+- Keep answers simple but informative
+- Encourage sustainable agriculture
+- Do not hallucinate unknown facts
+
+User Message:
+${message}
+`;
 
         let promptArgs: any[] = [systemPrompt];
 
-        if (pdfDataArray && Array.isArray(pdfDataArray) && pdfDataArray.length > 0) {
-            pdfDataArray.forEach((pdf: { name: string, data: string }) => {
+        // 📄 PDF Handling
+        if (pdfDataArray?.length) {
+            pdfDataArray.forEach((pdf: { data: string }) => {
                 promptArgs.push({
                     inlineData: {
                         data: pdf.data,
@@ -60,19 +118,29 @@ User Message: ${message}`;
                     }
                 });
             });
-            promptArgs.push("Please analyze the attached PDF reports, summarize their key points, compare them if there are more than one, and answer any specific questions from the user message.");
+
+            promptArgs.push(`
+Analyze the PDF(s):
+- Summarize key points
+- Compare if multiple files
+- Answer user's questions based on them
+`);
         }
 
         const result = await model.generateContent(promptArgs);
         const response = await result.response;
-        const textResponse = response.text();
 
-        return NextResponse.json({ reply: textResponse });
+        return NextResponse.json({
+            reply: response.text()
+        });
 
     } catch (error: any) {
-        console.error("AI Chat Error Details:", error);
+        console.error("AI Error:", error);
+
         return NextResponse.json(
-            { reply: `Sorry, I encountered an error: ${error.message || "I am having trouble connecting to my agricultural database right now."}` },
+            {
+                reply: "⚠️ Sorry, something went wrong. Please try again later."
+            },
             { status: 500 }
         );
     }
