@@ -28,7 +28,7 @@ export async function POST(req: Request) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    return new Promise<NextResponse>((resolve, reject) => {
+    const response = await new Promise<NextResponse>((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: 'soilguard_uploads' },
         (error, result) => {
@@ -50,6 +50,8 @@ export async function POST(req: Request) {
       });
       readableStream.pipe(uploadStream);
     });
+
+    return response;
   } catch (error: any) {
     return NextResponse.json({ message: 'Error processing upload', error: error.message }, { status: 500 });
   }
